@@ -1,0 +1,32 @@
+# Gizli məlumatlar — heç vaxt commit etməyin
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Logs
+logs/
+
+# Temp audio faylları
+*.mp3
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# YOLO model (böyük fayl)
+*.pt

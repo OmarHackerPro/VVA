@@ -13,6 +13,13 @@ from datetime import datetime
 from pathlib import Path
 import json
 
+# .env faylından API açarlarını yüklə (mövcuddursa)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv quraşdırılmayıbsa, mühit dəyişənlərini birbaşa istifadə et
+
 # ── İsteğe bağlı kitabxanalar ──────────────────────────────────────────────
 try:
     import google.generativeai as genai
@@ -75,10 +82,10 @@ log = logging.getLogger("VVA.Main")
 class Config:
     """Bütün tənzimləmələr bir yerdə."""
 
-    # ── API Açarları — Buraya öz açarlarınızı yazın ──────────────────────────
-    ELEVENLABS_KEY   = "SIZIN_ELEVENLABS_ACARINIZ_BURA"   # elevenlabs.io → Profile → API Key
+    # ── API Açarları — .env faylından yüklənir ───────────────────────────────
+    ELEVENLABS_KEY   = os.getenv("ELEVENLABS_KEY", "")    # elevenlabs.io → Profile → API Key
     ELEVENLABS_VOICE = "21m00Tcm4TlvDq8ikWAM"             # Rachel (multilingual)
-    GEMINI_KEY       = "SIZIN_GEMINI_ACARINIZ_BURA"       # aistudio.google.com/apikey
+    GEMINI_KEY       = os.getenv("GEMINI_KEY", "")        # aistudio.google.com/apikey
 
     # ── Kamera ─────────────────────────────────────────────────────────────
     CAM_INDEX = 0

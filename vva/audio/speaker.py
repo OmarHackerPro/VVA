@@ -5,6 +5,7 @@ import os
 import time
 import queue
 import threading
+import tempfile
 import requests
 from dataclasses import dataclass, field
 from collections import deque
@@ -90,6 +91,7 @@ class SpeechEngine:
 
     def __init__(self, vibration: VibrationMotor):
         self._q      : queue.PriorityQueue = queue.PriorityQueue()
+        self._play_q : queue.Queue = queue.Queue()  # ElevenLabs audio faylları üçün
         self._recent : deque = deque(maxlen=Config.RECENT_SPEECH_SIZE)
         self._seq    = 0
         self._vib    = vibration
@@ -103,14 +105,13 @@ class SpeechEngine:
                 eng = pyttsx3.init()
                 eng.setProperty("rate", 155)
                 eng.setProperty("volume", 1.0)
-                # Azərbaycan səsi yoxdursa ingilis istifadə et
                 self._pyttsx3_engine = eng
                 log.info("pyttsx3 TTS hazırdır.")
             except Exception as e:
                 log.warning("pyttsx3 init xətası: %s", e)
 
-        worker = threading.Thread(target=self._loop, daemon=True, name="SpeechWorker")
-        worker.start()
+        threading.Thread(target=self._loop, daemon=True, name="SpeechWorker").start()
+        threading.Thread(target=self._playback_loop, daemon=True, name="PlaybackWorker").start()
         log.info("SpeechEngine hazırdır.")
 
     def speak(self, text: str, priority: Priority = Priority.NORMAL, force: bool = False):
@@ -155,6 +156,24 @@ class SpeechEngine:
                 continue
             except Exception as e:
                 log.error("SpeechWorker xətası: %s", e)
+
+    def _playback_loop(self):
+        """ElevenLabs audio fayllarını asinxron oxudur və sonra silir."""
+        while True:
+            try:
+                path = self._play_q.get(timeout=1)
+                try:
+                    AudioPlayer.play_mp3(path)
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    self._play_q.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                log.error("PlaybackWorker xətası: %s", e)
 
     def _say(self, text: str):
         # 1) ElevenLabs (bulud)
@@ -210,10 +229,11 @@ class SpeechEngine:
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}: {r.text[:100]}")
 
-        tmp = os.path.join(Config.TEMP_DIR, "vva_audio.mp3")
-        with open(tmp, "wb") as f:
+        # Unikal temp fayl — PlaybackWorker oxudandan sonra silir
+        fd, tmp = tempfile.mkstemp(suffix=".mp3", dir=Config.TEMP_DIR, prefix="vva_")
+        with os.fdopen(fd, "wb") as f:
             f.write(r.content)
-        AudioPlayer.play_mp3(tmp)
+        self._play_q.put(tmp)  # SpeechWorker-i bloklamır
 
     def _pyttsx3_speak(self, text: str):
         """pyttsx3 tək thread-dən istifadə edilməlidir."""

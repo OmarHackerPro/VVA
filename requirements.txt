@@ -21,6 +21,13 @@ pytesseract>=0.3.10         # Python-Tesseract körpüsü
 # ── Sistem İzləmə ─────────────────────────────────────────────────────────────
 psutil>=5.9.8               # Batareya, CPU, yaddaş
 
+# ── Audio & TTS ───────────────────────────────────────────────────────────────
+pygame>=2.5.0               # MP3 oxuma (Windows/Linux/Mac)
+pyttsx3>=2.90               # Offline TTS (Windows/Mac/Linux)
+
+# ── Mühit dəyişənləri ─────────────────────────────────────────────────────────
+python-dotenv>=1.0.0        # .env faylından API açarlarını yüklə
+
 # ── Raspberry Pi GPIO (İsteğe bağlı) ─────────────────────────────────────────
 RPi.GPIO>=0.7.0             # GPIO vibrasiya motoru
 # Qeyd: Pi olmayan sistemlərdə bu paket quraşdırılmasa da işləyir

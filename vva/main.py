@@ -308,7 +308,7 @@ if __name__ == "__main__":
     Config.YOLO_CONF = args.conf
 
     if args.noai:
-        Config.GEMINI_KEY = "AIzaSyCrd1qyGyHyf9XWMZD3_z9d1DzhF56mM20"
+        Config.GEMINI_KEY = ""  # AI deaktiv edildi
     if args.gemini_key:
         Config.GEMINI_KEY = args.gemini_key
     if args.elevenlabs_key:
