@@ -130,6 +130,22 @@ class AiSettings:
 
 
 @dataclass(frozen=True)
+class PrivacySettings:
+    blur_faces: bool = True
+    blur_plates: bool = True
+    blur_ksize: int = 31
+
+
+@dataclass(frozen=True)
+class V2xSettings:
+    enabled: bool = False
+    broker_host: str = "localhost"
+    broker_port: int = 1883
+    sim_mode: bool = False
+    sim_interval_s: float = 30.0
+
+
+@dataclass(frozen=True)
 class Settings:
     """Top-level immutable configuration.
 
@@ -145,6 +161,8 @@ class Settings:
     gpio: GpioSettings = field(default_factory=GpioSettings)
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     ai: AiSettings = field(default_factory=AiSettings)
+    privacy: PrivacySettings = field(default_factory=PrivacySettings)
+    v2x: V2xSettings = field(default_factory=V2xSettings)
 
     log_level: str = "INFO"
     log_dir: Path = field(default_factory=lambda: Path("logs"))
@@ -175,6 +193,18 @@ class Settings:
                 enabled=_env_bool("VVA_DASHBOARD_ENABLED", False),
                 host=_env("VVA_DASHBOARD_HOST", "0.0.0.0"),
                 port=_env_int("VVA_DASHBOARD_PORT", 8080),
+            ),
+            privacy=PrivacySettings(
+                blur_faces=_env_bool("VVA_PRIVACY_BLUR_FACES", True),
+                blur_plates=_env_bool("VVA_PRIVACY_BLUR_PLATES", True),
+                blur_ksize=_env_int("VVA_PRIVACY_BLUR_KSIZE", 31),
+            ),
+            v2x=V2xSettings(
+                enabled=_env_bool("VVA_V2X_ENABLED", False),
+                broker_host=_env("VVA_V2X_BROKER_HOST", "localhost"),
+                broker_port=_env_int("VVA_V2X_BROKER_PORT", 1883),
+                sim_mode=_env_bool("VVA_V2X_SIM_MODE", False),
+                sim_interval_s=_env_float("VVA_V2X_SIM_INTERVAL_S", 30.0),
             ),
             log_level=_env("VVA_LOG_LEVEL", "INFO"),
             show_gui=_env_bool("VVA_SHOW_GUI", True) and not _is_headless(),

@@ -35,6 +35,9 @@ class EventType(Enum):
     SPEECH = "speech"                    # payload: SpeechEvent
     HAPTIC = "haptic"                    # payload: HapticEvent
 
+    # IoT / Smart City
+    V2X_ALERT = "v2x_alert"             # payload: V2xAlert (iot.v2x_client)
+
     # System / lifecycle
     HEALTH = "health"                    # payload: HealthReport
     MODE_CHANGE = "mode_change"          # payload: OperatingMode

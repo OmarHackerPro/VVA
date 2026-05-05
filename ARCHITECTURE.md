@@ -15,16 +15,20 @@ Runtime._stage_yolo ──► YoloDetector
 Runtime._stage_pit ──► PitDetector
                     └─► [PIT_WARNING] ──► SpeechEngine + HapticMotor
 
-Runtime._stage_ai ──► AiRouter.describe() (thread)
+Runtime._stage_ai ──► PrivacyFilter.redact() (PII blur)
+                   └─► AiRouter.describe() (thread)
                    └─► [AI_DESCRIPTION] ──► SpeechEngine
 
 Runtime._stage_ocr ──► OcrModule
                     └─► [OCR_TEXT] ──► SpeechEngine
 
 [SPEECH] ──► SpeechEngine.enqueue()
-          └─► TTS provider chain ──► AudioPlayer
+          └─► TTS provider chain ──► AudioPlayer (HrtfCue applied)
 
 [HAPTIC] ──► HapticMotor (GPIO PWM / no-op stub)
+
+[V2X_ALERT] ──► V2xClient (MQTT subscriber, daemon thread)
+             └─► [SPEECH] ──► SpeechEngine
 
 [HEALTH] ──► DashboardApp (WS) + HealthMonitor state
 [MODE_CHANGE] ──► DashboardApp (WS) + SpeechEngine
@@ -75,6 +79,25 @@ Morphological close+open removes noise. `cv2.findContours` finds connected regio
 ### BeepFallbackProvider (silence prevention)
 Generates a 880Hz square-wave WAV using only `numpy` + `wave` stdlib.
 No external TTS library required. Ensures the user always receives an audible signal.
+
+### PrivacyFilter (GDPR Article 25)
+Runs before every cloud API call. Detects faces (Haar cascade, OpenCV built-in) and
+probable licence plates (contour + aspect-ratio heuristic) and Gaussian-blurs them.
+Returns `(redacted_frame, RedactionStats)`. Never mutates the original frame.
+Falls back to a no-op when cv2 is unavailable.
+
+### HrtfCalculator (spatial audio)
+Computes per-channel gains and ITD/ILD from a normalised pan value using:
+- ITD: Woodworth & Schlosberg (1954) formula `Δt = (a/c)·(sin θ + θ)`
+- ILD: Feddersen et al. (1957) approximation `ΔL = L_max·sin θ`
+- Equal-power panning law for base gains; ILD applied multiplicatively.
+Replaces simple linear panning with a physics-grounded stereo model.
+
+### V2xClient (Smart City integration)
+Asynchronous MQTT subscriber on topic `vva/v2x/#`. Decodes JSON payloads covering
+emergency vehicle approach, traffic signal phases, and construction warnings.
+Fires `V2X_ALERT` + `SPEECH` events on the shared EventBus. Operates in simulation
+mode (synthetic events, no real broker) or against a live Mosquitto / RSU gateway.
 
 ## How to add a new detector
 

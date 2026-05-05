@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VisionVoiceAsist v5 — Docker Compose orchestration
+# Usage:  docker compose up -d
+#         docker compose logs -f vva
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+
+  # ── Main VVA application ───────────────────────────────────────────────────
+  vva:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: visionvoiceasist:5.0.0
+    container_name: vva-app
+    restart: unless-stopped
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      VVA_SHOW_GUI: "false"
+      VVA_DASHBOARD_ENABLED: "true"
+      VVA_V2X_BROKER_HOST: mqtt
+      VVA_V2X_BROKER_PORT: "1883"
+    # Camera device passthrough — adjust path if /dev/video1 or USB camera
+    devices:
+      - /dev/video0:/dev/video0
+    volumes:
+      - ./logs:/app/logs
+      # Uncomment to mount pre-downloaded YOLO model weights:
+      # - ./models:/app/models:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - vva-net
+    # Resource limits sized for Raspberry Pi 5 (4 GB RAM, 4-core Cortex-A76)
+    deploy:
+      resources:
+        limits:
+          cpus: "3.6"
+          memory: "3G"
+
+  # ── MQTT broker (Mosquitto) — V2X message bus ──────────────────────────────
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: vva-mqtt
+    restart: unless-stopped
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+      - mqtt-log:/mosquitto/log
+    ports:
+      - "1883:1883"
+    networks:
+      - vva-net
+    healthcheck:
+      test:
+        - CMD
+        - mosquitto_sub
+        - -t
+        - $$SYS/#
+        - -C
+        - "1"
+        - -i
+        - healthcheck
+        - -W
+        - "3"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mqtt-data:
+  mqtt-log:
+
+networks:
+  vva-net:
+    driver: bridge
