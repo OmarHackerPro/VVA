@@ -195,9 +195,14 @@ echo ""
 echo "  Edit .env and add your API keys:"
 echo "    nano $ENV_FILE"
 echo ""
-echo "  Run manually:"
-echo "    source $VENV_DIR/bin/activate"
-echo "    vva --no-gui"
+read -p "  Gemini API açarınızı daxil edin ... " GEMINI_KEY
+if [ -n "$GEMINI_KEY" ]; then
+    sed -i "s|AIzaSyDyVH7h6JK7Hn0dzVlCMpA8W30NNdCuRks|$GEMINI_KEY|g" "$PROJECT_DIR/main.py"
+    echo "Gemini açarı yazıldı."
+else
+    echo "Açar verilmədi, sonra əl ilə main.py faylına yazın."
+fi
+# ── Nəticə ───────────────────────────────────────────────────────────────────
 echo ""
 if $INSTALL_SERVICE && command -v systemctl &>/dev/null; then
   echo "  Start as service:"
