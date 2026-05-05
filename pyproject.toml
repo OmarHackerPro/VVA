@@ -1,0 +1,171 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visionvoiceasist"
+version = "5.0.0"
+description = "AI-powered wearable assistive system for visually impaired users — edge-first, offline-capable, Azerbaijani-native."
+readme = "README_PRO.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Əliəsgər Fatullayev", email = "founder@ai-vision.local" },
+]
+keywords = ["accessibility", "computer-vision", "assistive-tech", "wearable", "edge-ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Video :: Capture",
+]
+
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "ultralytics>=8.2",
+    "google-generativeai>=0.7",
+    "Pillow>=10.0",
+    "requests>=2.32",
+    "psutil>=5.9",
+    "python-dotenv>=1.0",
+    "pyttsx3>=2.90",
+    "pygame>=2.5",
+    "pytesseract>=0.3.10",
+    "tenacity>=8.3",
+]
+
+[project.optional-dependencies]
+hardware = ["RPi.GPIO>=0.7; platform_system == 'Linux'"]
+dashboard = ["flask>=3.0", "flask-socketio>=5.3", "eventlet>=0.36"]
+local-vlm = ["transformers>=4.40", "torch>=2.2", "accelerate>=0.30"]
+voice-query = ["openai-whisper>=20231117"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.12",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "bandit>=1.7",
+    "detect-secrets>=1.5",
+    "pre-commit>=3.7",
+    "types-requests",
+    "types-psutil",
+]
+
+[project.scripts]
+vva = "visionvoiceasist.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/aliasgar/visionvoiceasist"
+Documentation = "https://github.com/aliasgar/visionvoiceasist/blob/main/ARCHITECTURE.md"
+Issues = "https://github.com/aliasgar/visionvoiceasist/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["visionvoiceasist*"]
+
+[tool.setuptools.package-data]
+visionvoiceasist = ["py.typed", "dashboard/templates/*.html", "dashboard/static/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build", "dist", ".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # flake8-bugbear
+    "UP",       # pyupgrade
+    "SIM",      # flake8-simplify
+    "S",        # flake8-bandit
+    "TID",      # flake8-tidy-imports
+    "RUF",      # ruff-specific
+]
+ignore = [
+    "S101",   # assert allowed in tests
+    "S603",   # subprocess without shell — we use safe_subprocess
+    "S607",   # partial executable path — required for cross-platform
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B011"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+warn_unreachable = true
+warn_redundant_casts = true
+no_implicit_optional = true
+show_error_codes = true
+exclude = ["build/", "dist/", "tests/fixtures/"]
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2.*", "ultralytics.*", "google.generativeai.*", "pygame.*",
+    "pyttsx3.*", "pytesseract.*", "RPi.*", "PIL.*", "psutil.*",
+    "flask_socketio.*", "whisper.*", "transformers.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config --cov=visionvoiceasist --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow",
+    "hardware: requires real hardware",
+    "network: requires network access",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["visionvoiceasist"]
+omit = [
+    # Hardware / physical-device modules (require GPIO, camera, mic)
+    "visionvoiceasist/hardware/*",
+    "visionvoiceasist/vision/camera.py",
+    "visionvoiceasist/vision/detector.py",
+    "visionvoiceasist/vision/ocr.py",
+    # ML / cloud modules (require model weights or API keys)
+    "visionvoiceasist/ai/*",
+    # Audio output (requires audio drivers / soundcard)
+    "visionvoiceasist/audio/providers.py",
+    "visionvoiceasist/audio/player.py",
+    "visionvoiceasist/audio/speech.py",
+    # Top-level orchestrator and UI
+    "visionvoiceasist/runtime.py",
+    "visionvoiceasist/ui/*",
+    "visionvoiceasist/dashboard/*",
+    # CLI / entrypoints
+    "visionvoiceasist/__main__.py",
+    "visionvoiceasist/cli.py",
+    # Utility helpers only used at startup
+    "visionvoiceasist/utils/device.py",
+    "visionvoiceasist/utils/logging.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+    "@overload",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "build", "dist"]
+skips = ["B101", "B404", "B603", "B607"]

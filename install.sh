@@ -1,187 +1,209 @@
-#!/bin/bash
-# ════════════════════════════════════════════════════════════════════════════
-#  VisionVoiceAsist v3.0 — Avtomatik Quraşdırma Skripti
-#  Raspberry Pi OS (Bookworm 64-bit) üçün optimallaşdırılmışdır
-#  İstifadə: chmod +x install.sh && sudo ./install.sh
-# ════════════════════════════════════════════════════════════════════════════
+#!/usr/bin/env bash
+# VisionVoiceAsist v5 — Raspberry Pi 5 installer + systemd service setup
+# Usage: bash install.sh [--no-service] [--no-deps]
+set -euo pipefail
 
-set -e  # Hər hansı xətada dayandır
+# ── Colours ──────────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+info()    { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
+# ── Argument parsing ──────────────────────────────────────────────────────────
+INSTALL_SERVICE=true
+INSTALL_DEPS=true
+for arg in "$@"; do
+  case "$arg" in
+    --no-service) INSTALL_SERVICE=false ;;
+    --no-deps)    INSTALL_DEPS=false ;;
+    --help|-h)
+      echo "Usage: $0 [--no-service] [--no-deps]"
+      echo "  --no-service  Skip systemd service installation"
+      echo "  --no-deps     Skip apt / pip dependency installation"
+      exit 0 ;;
+    *) warn "Unknown argument: $arg" ;;
+  esac
+done
 
-banner() {
-cat << 'EOF'
+# ── Constants ─────────────────────────────────────────────────────────────────
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$REPO_DIR/.venv"
+SERVICE_NAME="visionvoiceasist"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+LOG_DIR="$REPO_DIR/logs"
+ENV_FILE="$REPO_DIR/.env"
 
- ██╗   ██╗██╗███████╗██╗ ██████╗ ███╗   ██╗
- ██║   ██║██║██╔════╝██║██╔═══██╗████╗  ██║
- ██║   ██║██║███████╗██║██║   ██║██╔██╗ ██║
- ╚██╗ ██╔╝██║╚════██║██║██║   ██║██║╚██╗██║
-  ╚████╔╝ ██║███████║██║╚██████╔╝██║ ╚████║
-   ╚═══╝  ╚═╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+# ── Sanity checks ─────────────────────────────────────────────────────────────
+info "VisionVoiceAsist v5 installer"
+info "Repo: $REPO_DIR"
 
- VoiceAsist v3.0 — Quraşdırma Skripti
- Founder: Əliəsgər | Olympiad Edition
-
-EOF
-}
-
-step()  { echo -e "${CYAN}${BOLD}[►]${NC} $1"; }
-ok()    { echo -e "${GREEN}${BOLD}[✓]${NC} $1"; }
-warn()  { echo -e "${YELLOW}${BOLD}[!]${NC} $1"; }
-fail()  { echo -e "${RED}${BOLD}[✗]${NC} $1"; exit 1; }
-
-banner
-
-# ── Kök icazəsi yoxlaması ────────────────────────────────────────────────────
-if [ "$EUID" -ne 0 ]; then
-    fail "Bu skript root icazəsi tələb edir. sudo ./install.sh ilə işlədin."
-fi
-
-# ── Sistem yeniləmə ─────────────────────────────────────────────────────────
-step "Sistem paketləri yenilənir..."
-apt-get update -qq && apt-get upgrade -y -qq
-ok "Sistem yeniləndi."
-
-# ── Sistem asılılıqları ─────────────────────────────────────────────────────
-step "Sistem asılılıqları quraşdırılır..."
-apt-get install -y -qq \
-    python3-pip python3-dev python3-venv \
-    libopencv-dev python3-opencv \
-    tesseract-ocr tesseract-ocr-aze tesseract-ocr-eng \
-    mpg123 espeak espeak-data \
-    libatlas-base-dev libhdf5-dev \
-    libcamera-apps rpicam-apps \
-    git curl wget unzip \
-    libgpiod2 python3-gpiod \
-    v4l-utils \
-    libjpeg-dev libpng-dev libtiff-dev \
-    libavcodec-dev libavformat-dev libswscale-dev \
-    2>/dev/null || warn "Bəzi paketlər quraşdırılmadı (normal ola bilər)"
-ok "Sistem asılılıqları hazırdır."
-
-# ── Kamera aktivləşdirməsi (Pi 5) ───────────────────────────────────────────
-step "Kamera interfeysi yoxlanılır..."
-if command -v raspi-config &>/dev/null; then
-    raspi-config nonint do_camera 0 2>/dev/null || true
-    ok "Kamera interfeysi aktiv edildi."
+if [[ "$(id -u)" -eq 0 ]]; then
+  warn "Running as root. Service will be installed for root."
+  SERVICE_USER="root"
 else
-    warn "raspi-config tapılmadı (Pi olmayan sistem)."
+  SERVICE_USER="$(id -un)"
 fi
 
-# ── Python virtual mühiti ───────────────────────────────────────────────────
-VENV_DIR="/opt/visionvoiceasist"
-step "Python virtual mühiti yaradılır: $VENV_DIR"
-python3 -m venv "$VENV_DIR" --system-site-packages
+# Check Python 3.10+
+if ! command -v python3 &>/dev/null; then
+  error "python3 not found. Install with: sudo apt install python3"
+  exit 1
+fi
+PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
+PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
+if [[ "$PY_MAJOR" -lt 3 ]] || { [[ "$PY_MAJOR" -eq 3 ]] && [[ "$PY_MINOR" -lt 10 ]]; }; then
+  error "Python 3.10+ required. Found: $PY_VER"
+  exit 1
+fi
+info "Python $PY_VER OK"
+
+# ── System dependencies ───────────────────────────────────────────────────────
+if $INSTALL_DEPS; then
+  info "Installing system dependencies..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update -qq
+    sudo apt-get install -y --no-install-recommends \
+      python3-venv python3-pip \
+      libatlas-base-dev libopenblas-dev \
+      libhdf5-dev libhdf5-serial-dev \
+      libjpeg-dev libpng-dev libtiff-dev \
+      espeak-ng \
+      tesseract-ocr tesseract-ocr-aze \
+      libportaudio2 portaudio19-dev \
+      i2c-tools \
+      git curl
+    info "System deps installed"
+  else
+    warn "apt-get not found. Skipping system package install."
+  fi
+fi
+
+# ── Python virtual environment ────────────────────────────────────────────────
+info "Setting up Python virtual environment at $VENV_DIR..."
+python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
-ok "Virtual mühit aktiv."
+pip install --upgrade pip wheel setuptools -q
 
-# ── pip yeniləmə ────────────────────────────────────────────────────────────
-step "pip yenilənir..."
-pip install --upgrade pip setuptools wheel -q
-ok "pip hazırdır."
+# ── Python packages ───────────────────────────────────────────────────────────
+if $INSTALL_DEPS; then
+  info "Installing Python packages (this may take several minutes on Pi 5)..."
+  pip install -e "$REPO_DIR" -q
 
-# ── Python kitabxanaları ─────────────────────────────────────────────────────
-step "Python asılılıqları quraşdırılır (bu bir neçə dəqiqə çəkə bilər)..."
+  # Hardware extra (GPIO) — only on Linux
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    pip install "RPi.GPIO>=0.7" -q 2>/dev/null || warn "RPi.GPIO unavailable (not on RPi?)"
+    pip install smbus2 -q || warn "smbus2 unavailable"
+  fi
 
-pip install -q \
-    "ultralytics>=8.2.0" \
-    "google-generativeai>=0.30.0" \
-    "requests>=2.32.0" \
-    "psutil>=5.9.0" \
-    "numpy>=1.26.0" \
-    "pytesseract>=0.3.10" \
-    "opencv-python-headless>=4.9.0" \
-    "RPi.GPIO>=0.7.0" \
-    2>/dev/null || warn "Bəzi paketlər quraşdırılmadı."
+  info "Core packages installed"
+fi
 
-ok "Python kitabxanaları hazırdır."
+# ── .env file ─────────────────────────────────────────────────────────────────
+if [[ ! -f "$ENV_FILE" ]]; then
+  if [[ -f "$REPO_DIR/.env.example" ]]; then
+    cp "$REPO_DIR/.env.example" "$ENV_FILE"
+    warn ".env created from .env.example — EDIT IT and add your API keys:"
+    warn "  nano $ENV_FILE"
+  else
+    cat > "$ENV_FILE" <<'ENVEOF'
+GEMINI_KEY=
+ELEVENLABS_KEY=
+VVA_CAM_INDEX=0
+VVA_OFFLINE_MODE=auto
+VVA_SHOW_GUI=false
+VVA_LOG_LEVEL=INFO
+ENVEOF
+    warn ".env created with defaults — add API keys before first run"
+  fi
+else
+  info ".env already exists — skipping"
+fi
 
-# ── YOLOv8 modelini əvvəlcədən yüklə ───────────────────────────────────────
-step "YOLOv8 nano modeli yüklənir..."
-python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" 2>/dev/null
-ok "YOLOv8n modeli hazırdır."
+# ── Log directory ─────────────────────────────────────────────────────────────
+mkdir -p "$LOG_DIR"
+info "Log directory: $LOG_DIR"
 
-# ── Layihə qovluğu ───────────────────────────────────────────────────────────
-PROJECT_DIR="/home/$SUDO_USER/VisionVoiceAsist"
-step "Layihə qovluğu hazırlanır: $PROJECT_DIR"
-mkdir -p "$PROJECT_DIR/logs"
-cp main.py "$PROJECT_DIR/"
-chown -R "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR"
-ok "Layihə qovluğu hazırdır."
+# ── Systemd service ────────────────────────────────────────────────────────────
+if $INSTALL_SERVICE && command -v systemctl &>/dev/null; then
+  info "Installing systemd service: $SERVICE_NAME"
 
-# ── Başlatma skripti ─────────────────────────────────────────────────────────
-step "Başlatma skripti yaradılır..."
-cat > "$PROJECT_DIR/start.sh" << STARTSCRIPT
-#!/bin/bash
-source /opt/visionvoiceasist/bin/activate
-cd $PROJECT_DIR
-python3 main.py "\$@"
-STARTSCRIPT
-chmod +x "$PROJECT_DIR/start.sh"
-chown "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR/start.sh"
-ok "start.sh hazırdır."
-
-# ── systemd Xidməti (avtomatik başlatma) ─────────────────────────────────────
-step "systemd xidməti quraşdırılır (boot-da avtomatik başlatma)..."
-cat > /etc/systemd/system/visionvoiceasist.service << SERVICE
+  sudo tee "$SERVICE_FILE" > /dev/null <<SVCEOF
 [Unit]
-Description=VisionVoiceAsist - AI Gorma Yardimcisi
+Description=VisionVoiceAsist v5 — AI Smart Glasses
+Documentation=file://${REPO_DIR}/ARCHITECTURE.md
 After=network.target sound.target
-Wants=network.target
 
 [Service]
 Type=simple
-User=$SUDO_USER
-WorkingDirectory=$PROJECT_DIR
-ExecStart=/opt/visionvoiceasist/bin/python3 $PROJECT_DIR/main.py
+User=${SERVICE_USER}
+WorkingDirectory=${REPO_DIR}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${VENV_DIR}/bin/vva --no-gui
 Restart=on-failure
-RestartSec=5
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/$SUDO_USER/.Xauthority
+RestartSec=5s
+StandardOutput=append:${LOG_DIR}/service.log
+StandardError=append:${LOG_DIR}/service.log
+KillMode=mixed
+TimeoutStopSec=10s
+
+# Resource limits for Raspberry Pi 5
+CPUQuota=90%
+MemoryMax=3G
+Nice=-5
 
 [Install]
 WantedBy=multi-user.target
-SERVICE
+SVCEOF
 
-systemctl daemon-reload
-ok "systemd xidməti quraşdırıldı."
-
-# ── GPIO İcazəsi ─────────────────────────────────────────────────────────────
-step "GPIO icazəsi verilir..."
-usermod -aG gpio "$SUDO_USER" 2>/dev/null || true
-usermod -aG video "$SUDO_USER" 2>/dev/null || true
-usermod -aG audio "$SUDO_USER" 2>/dev/null || true
-ok "İcazələr verildi."
-
-# ── API Açarı Konfiqurasiyası ─────────────────────────────────────────────────
-echo ""
-echo -e "${YELLOW}${BOLD}═══════════════════════════════════════════════════════${NC}"
-echo -e "${YELLOW}${BOLD}  API Açarı Konfiqurasiyası${NC}"
-echo -e "${YELLOW}${BOLD}═══════════════════════════════════════════════════════${NC}"
-echo ""
-read -p "  Gemini API açarınızı daxil edin ... " GEMINI_KEY
-if [ -n "$GEMINI_KEY" ]; then
-    sed -i "s|AIzaSyDyVH7h6JK7Hn0dzVlCMpA8W30NNdCuRks|$GEMINI_KEY|g" "$PROJECT_DIR/main.py"
-    echo "Gemini açarı yazıldı."
+  sudo systemctl daemon-reload
+  sudo systemctl enable "$SERVICE_NAME"
+  info "Service enabled. Commands:"
+  info "  sudo systemctl start $SERVICE_NAME   # start now"
+  info "  sudo systemctl status $SERVICE_NAME  # check status"
+  info "  journalctl -u $SERVICE_NAME -f       # follow logs"
 else
-    echo "Açar verilmədi, sonra əl ilə main.py faylına yazın."
+  if ! $INSTALL_SERVICE; then
+    info "Skipping service install (--no-service)"
+  else
+    warn "systemctl not found — skipping service install"
+  fi
 fi
-# ── Nəticə ───────────────────────────────────────────────────────────────────
+
+# ── I2C / camera / audio permissions ─────────────────────────────────────────
+if [[ "$(uname -s)" == "Linux" ]] && id -nG "$SERVICE_USER" | grep -qv "i2c"; then
+  info "Adding $SERVICE_USER to i2c, gpio, audio, video groups..."
+  for grp in i2c gpio audio video spi; do
+    sudo usermod -aG "$grp" "$SERVICE_USER" 2>/dev/null || true
+  done
+  warn "Group changes take effect after logout/login (or reboot)"
+fi
+
+# ── Enable I2C on Raspberry Pi ────────────────────────────────────────────────
+if [[ -f /boot/firmware/config.txt ]] && ! grep -q "^dtparam=i2c_arm=on" /boot/firmware/config.txt; then
+  info "Enabling I2C in /boot/firmware/config.txt..."
+  echo "dtparam=i2c_arm=on" | sudo tee -a /boot/firmware/config.txt > /dev/null
+  warn "I2C enabled — reboot required for MPU-6050"
+fi
+
+# ── Final summary ──────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}${BOLD}║         QURAŞDIRMA UĞURLA TAMAMLANDI! ✓                 ║${NC}"
-echo -e "${GREEN}${BOLD}╠══════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}${BOLD}║  Başlatmaq üçün:                                         ║${NC}"
-echo -e "${GREEN}${BOLD}║    cd $PROJECT_DIR                                ║${NC}"
-echo -e "${GREEN}${BOLD}║    ./start.sh                                            ║${NC}"
-echo -e "${GREEN}${BOLD}║                                                          ║${NC}"
-echo -e "${GREEN}${BOLD}║  Boot-da avtomatik başlatmaq üçün:                       ║${NC}"
-echo -e "${GREEN}${BOLD}║    sudo systemctl enable visionvoiceasist                ║${NC}"
-echo -e "${GREEN}${BOLD}║    sudo systemctl start visionvoiceasist                 ║${NC}"
-echo -e "${GREEN}${BOLD}║                                                          ║${NC}"
-echo -e "${GREEN}${BOLD}║  Jurnalları görmək üçün:                                 ║${NC}"
-echo -e "${GREEN}${BOLD}║    ls $PROJECT_DIR/logs/               ║${NC}"
-echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN} VisionVoiceAsist v5 — Installation Complete${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-warn "Dəyişikliklərin tam qüvvəyə minməsi üçün sistemi yenidən başladın: sudo reboot"
+echo "  Edit .env and add your API keys:"
+echo "    nano $ENV_FILE"
+echo ""
+echo "  Run manually:"
+echo "    source $VENV_DIR/bin/activate"
+echo "    vva --no-gui"
+echo ""
+if $INSTALL_SERVICE && command -v systemctl &>/dev/null; then
+  echo "  Start as service:"
+  echo "    sudo systemctl start $SERVICE_NAME"
+  echo ""
+fi
+echo "  View logs:"
+echo "    tail -f $LOG_DIR/service.log"
+echo ""
